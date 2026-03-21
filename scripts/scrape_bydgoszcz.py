@@ -135,6 +135,27 @@ def download_pdf(url: str, cache_dir: Path) -> Path | None:
     filename = url.split("/")[-1]
     if not filename.endswith(".pdf"):
         import hashlib
+        filename = hashlib.md5(url.encode()).hexdigest() + ".pdf"
+
+    path = cache_dir / filename
+
+    if path.exists() and path.stat().st_size > 1000:
+        print(f"    Cache hit: {filename}")
+        return path
+
+    try:
+        resp = requests.get(url, headers=HEADERS, timeout=30)
+        resp.raise_for_status()
+        if b"%PDF" not in resp.content[:10]:
+            print(f"    UWAGA: Nie PDF ({len(resp.content)} bytes)")
+            return None
+        path.write_bytes(resp.content)
+        print(f"    Zapisano: {filename} ({len(resp.content)} bytes)")
+        return path
+    except Exception as e:
+        print(f"    BŁĄD pobierania PDF {url}: {e}")
+        return None
+
 
 def compact_named_votes(output):
     """Convert named_votes from string arrays to indexed format for smaller JSON."""
@@ -156,28 +177,6 @@ def compact_named_votes(output):
             for cat in nv:
                 nv[cat] = sorted(name_to_idx[n] for n in nv[cat] if isinstance(n, str) and n in name_to_idx)
     return output
-
-
-        filename = hashlib.md5(url.encode()).hexdigest() + ".pdf"
-
-    path = cache_dir / filename
-
-    if path.exists() and path.stat().st_size > 1000:
-        print(f"    Cache hit: {filename}")
-        return path
-
-    try:
-        resp = requests.get(url, headers=HEADERS, timeout=30)
-        resp.raise_for_status()
-        if b"%PDF" not in resp.content[:10]:
-            print(f"    UWAGA: Nie PDF ({len(resp.content)} bytes)")
-            return None
-        path.write_bytes(resp.content)
-        print(f"    Zapisano: {filename} ({len(resp.content)} bytes)")
-        return path
-    except Exception as e:
-        print(f"    BŁĄD pobierania PDF {url}: {e}")
-        return None
 
 
 
