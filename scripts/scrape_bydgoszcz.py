@@ -1,0 +1,673 @@
+#!/usr/bin/env python3
+"""
+Scraper danych głosowań Rady Miasta Bydgoszczy.
+
+UWAGA: Uruchom lokalnie — sandbox Cowork blokuje domeny.
+
+Źródło: bip.um.bydgoszcz.pl
+BIP Bydgoszcz to standardowy HTML — nie wymaga JavaScript.
+Używa requests + BeautifulSoup do scrapowania, PyMuPDF do PDF.
+
+Struktura BIP:
+  1. Lista imiennych wykazów głosowań: https://bip.um.bydgoszcz.pl/artykul/1211/5811/imienne-wykazy-glosowan-radnych-w-roku-2024-kadencja-2024-2029
+  2. Każdy link to PDF z wynikami głosowania dla jednej sesji
+  3. Format PDF: nagłówek z datą sesji + tabela "Lp. / Nazwisko i imię / Głos"
+  4. Głosy: ZA, PRZECIW, WSTRZYMUJĘ SIĘ, NIEOBECNY/NIEOBECNA
+
+Użycie:
+    pip install requests beautifulsoup4 lxml pymupdf
+    python scrape_bydgoszcz.py [--output docs/data.json] [--profiles docs/profiles.json]
+"""
+
+import argparse
+import json
+import re
+import sys
+import time
+from collections import Counter, defaultdict
+from datetime import datetime
+from itertools import combinations
+from pathlib import Path
+from urllib.parse import urljoin, urlparse
+
+try:
+    from bs4 import BeautifulSoup
+except ImportError:
+    print("Zainstaluj: pip install beautifulsoup4 lxml")
+    sys.exit(1)
+
+try:
+    import requests
+except ImportError:
+    print("Zainstaluj: pip install requests")
+    sys.exit(1)
+
+try:
+    import fitz
+except ImportError:
+    print("Zainstaluj: pip install pymupdf")
+    sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
+
+BIP_BASE = "https://bip.um.bydgoszcz.pl/"
+VOTING_LIST_URL = "https://bip.um.bydgoszcz.pl/artykul/1211/5811/imienne-wykazy-glosowan-radnych-w-roku-2024-kadencja-2024-2029"
+
+KADENCJE = {
+    "2024-2029": {
+        "label": "IX kadencja (2024–2029)",
+        "start": "2024-05-07",
+    },
+}
+
+HEADERS = {
+    "User-Agent": "Radoskop/1.0 (https://bydgoszcz.radoskop.pl; kontakt@radoskop.pl)",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+}
+
+DELAY = 0.5
+
+# Mapper numerów sesji na daty — uzupełnić na podstawie dostępnych danych
+# Format: "nr_sesji_roman" -> "2024-MM-DD"
+SESSION_DATES = {
+    # To be filled based on BIP data
+}
+
+# Councillor names and clubs — Rada Miasta Bydgoszczy IX kadencja (2024-2029)
+# Data source: bip.um.bydgoszcz.pl and election results 2024
+COUNCILORS = {
+    # KO/Lewica coalition (15 mandates)
+    "Monika Matowska": "KO",
+    "Lech Zagłoba-Zygler": "KO",
+    "Anna Mackiewicz": "KO",
+    "Janusz Czwojda": "KO",
+    "Kazimierz Drozd": "KO",
+    "Maciej Świątkowski": "KO",
+    "Zdzisław Tylicki": "KO",
+    "Elżbieta Rusielewicz": "KO",
+    "Mateusz Zwolak": "KO",
+    "Robert Kufel": "KO",
+    "Jakub Mikołajczak": "KO",
+    "Jan Szopiński": "KO",
+    "Marek Jeleniewski": "KO",
+    "Izabela Nowicka": "KO",
+    "Maria Gałęska": "KO",
+    # Bydgoska Prawica/PiS coalition (10 mandates)
+    "Paweł Bokiej": "PiS",
+    "Bogdan Dzakanowski": "PiS",
+    "Szymon Róg": "PiS",
+    "Grażyna Szabelska": "PiS",
+    "Wojciech Bielawa": "PiS",
+    "Piotr Walczak": "PiS",
+    "Paweł Sieg": "PiS",
+    "Michał Krzemkowski": "PiS",
+    "Jędrzej Gralik": "PiS",
+    "Katarzyna Siembida": "PiS",
+    # Trzecia Droga (3 mandates)
+    "Radosław Ginther": "Trzecia Droga",
+    "Joanna Czerska-Thomas": "Trzecia Droga",
+    "Tomasz Hoppe": "Trzecia Droga",
+}
+
+MONTHS_PL = {
+    "stycznia": 1, "luty": 2, "marca": 3, "kwietnia": 4,
+    "maja": 5, "czerwca": 6, "lipca": 7, "sierpnia": 8,
+    "września": 9, "października": 10, "listopada": 11, "grudnia": 12,
+}
+
+
+# ---------------------------------------------------------------------------
+# HTTP helpers
+# ---------------------------------------------------------------------------
+
+def fetch(url: str) -> BeautifulSoup:
+    """Pobiera stronę i zwraca BeautifulSoup."""
+    resp = requests.get(url, headers=HEADERS, timeout=30)
+    resp.raise_for_status()
+    return BeautifulSoup(resp.text, "html.parser")
+
+
+def download_pdf(url: str, cache_dir: Path) -> Path | None:
+    """Download a PDF to cache directory. Skip if already cached."""
+    filename = url.split("/")[-1]
+    if not filename.endswith(".pdf"):
+        import hashlib
+
+def compact_named_votes(output):
+    """Convert named_votes from string arrays to indexed format for smaller JSON."""
+    for kad in output.get("kadencje", []):
+        names = set()
+        for v in kad.get("votes", []):
+            nv = v.get("named_votes", {})
+            for cat_names in nv.values():
+                for n in cat_names:
+                    if isinstance(n, str):
+                        names.add(n)
+        if not names:
+            continue
+        index = sorted(names, key=lambda n: n.split()[-1] + " " + n)
+        name_to_idx = {n: i for i, n in enumerate(index)}
+        kad["councilor_index"] = index
+        for v in kad.get("votes", []):
+            nv = v.get("named_votes", {})
+            for cat in nv:
+                nv[cat] = sorted(name_to_idx[n] for n in nv[cat] if isinstance(n, str) and n in name_to_idx)
+    return output
+
+
+        filename = hashlib.md5(url.encode()).hexdigest() + ".pdf"
+
+    path = cache_dir / filename
+
+    if path.exists() and path.stat().st_size > 1000:
+        print(f"    Cache hit: {filename}")
+        return path
+
+    try:
+        resp = requests.get(url, headers=HEADERS, timeout=30)
+        resp.raise_for_status()
+        if b"%PDF" not in resp.content[:10]:
+            print(f"    UWAGA: Nie PDF ({len(resp.content)} bytes)")
+            return None
+        path.write_bytes(resp.content)
+        print(f"    Zapisano: {filename} ({len(resp.content)} bytes)")
+        return path
+    except Exception as e:
+        print(f"    BŁĄD pobierania PDF {url}: {e}")
+        return None
+
+
+
+def save_split_output(output, out_path):
+    """Save output as split files: data.json (index) + kadencja-{id}.json per kadencja."""
+    import json as _json
+    from pathlib import Path as _Path
+    compact_named_votes(output)
+    out_path = _Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    stubs = []
+    for kad in output.get("kadencje", []):
+        kid = kad["id"]
+        stubs.append({"id": kid, "label": kad.get("label", f"Kadencja {kid}")})
+        kad_path = out_path.parent / f"kadencja-{kid}.json"
+        with open(kad_path, "w", encoding="utf-8") as f:
+            _json.dump(kad, f, ensure_ascii=False, separators=(",", ":"))
+    index = {
+        "generated": output.get("generated", ""),
+        "default_kadencja": output.get("default_kadencja", ""),
+        "kadencje": stubs,
+    }
+    with open(out_path, "w", encoding="utf-8") as f:
+        _json.dump(index, f, ensure_ascii=False, separators=(",", ":"))
+
+
+def fetch_pdf(url: str) -> bytes:
+    """Pobiera PDF (legacy — bez cache)."""
+    resp = requests.get(url, headers=HEADERS, timeout=30)
+    resp.raise_for_status()
+    return resp.content
+
+
+# ---------------------------------------------------------------------------
+# Parsing helpers
+# ---------------------------------------------------------------------------
+
+def parse_polish_date(text: str) -> str | None:
+    """Parse '25 Listopada 2024 r.' or '25 Listopada 2024' → '2024-11-25'."""
+    text = text.strip().rstrip(".")
+    # Remove trailing 'r' or 'r.'
+    text = re.sub(r'\s*r\.?$', '', text)
+    m = re.match(r'(\d{1,2})\s+(\w+)\s+(\d{4})', text)
+    if not m:
+        return None
+    day = int(m.group(1))
+    month_name = m.group(2).lower()
+    year = int(m.group(3))
+    month = MONTHS_PL.get(month_name)
+    if not month:
+        return None
+    return f"{year}-{month:02d}-{day:02d}"
+
+
+def roman_to_int(s: str) -> int | None:
+    """Convert Roman numeral to int (I → 1, II → 2, etc.)."""
+    s = s.upper().strip()
+    val = 0
+    i = 0
+    rom_values = {'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100, 'D': 500, 'M': 1000}
+    while i < len(s):
+        if i + 1 < len(s) and rom_values.get(s[i], 0) < rom_values.get(s[i+1], 0):
+            val += rom_values.get(s[i+1], 0) - rom_values.get(s[i], 0)
+            i += 2
+        else:
+            val += rom_values.get(s[i], 0)
+            i += 1
+    return val if val > 0 else None
+
+
+# ---------------------------------------------------------------------------
+# Step 1: Scrape voting list
+# ---------------------------------------------------------------------------
+
+def scrape_voting_list() -> list[dict]:
+    """Pobiera listę PDF-ów z imiennymi wykazami głosowań."""
+    print(f"  Pobieram listę głosowań: {VOTING_LIST_URL}")
+
+    try:
+        soup = fetch(VOTING_LIST_URL)
+    except Exception as e:
+        print(f"  BŁĄD: Nie udało się pobrać listy głosowań: {e}")
+        return []
+
+    pdf_links = []
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        text = a.get_text(strip=True)
+
+        # Look for links to PDFs or attachment downloads
+        if "attachments/download" in href or href.endswith(".pdf"):
+            full_url = urljoin(BIP_BASE, href) if not href.startswith("http") else href
+            pdf_links.append({
+                "url": full_url,
+                "title": text,
+            })
+
+    print(f"  Znaleziono {len(pdf_links)} linków do PDF-ów")
+    return pdf_links
+
+
+# ---------------------------------------------------------------------------
+# Step 2: Parse PDF voting data
+# ---------------------------------------------------------------------------
+
+def extract_text_from_pdf(pdf_data: bytes) -> str:
+    """Ekstraktuje tekst z PDF-u."""
+    try:
+        doc = fitz.open(stream=pdf_data, filetype="pdf")
+        text = ""
+        for page in doc:
+            text += page.get_text()
+        return text
+    except Exception as e:
+        print(f"    Błąd przy parsowaniu PDF: {e}")
+        return ""
+
+
+def parse_voting_pdf(pdf_data: bytes, url: str) -> dict | None:
+    """Parsuje PDF z wynikami głosowania.
+
+    Zwraca dict z:
+      - session_date: "2024-MM-DD"
+      - session_number: "VI" (Roman numeral)
+      - votes: {
+          "full_name": {
+            "vote": "za|przeciw|wstrzymal_sie|nieobecny",
+            "club": "KO|PiS|..." (if known)
+          },
+          ...
+        }
+      - metadata: {
+          "url": pdf_url,
+          "parsed_text": raw text (first 500 chars for debugging)
+        }
+    """
+    text = extract_text_from_pdf(pdf_data)
+    if not text:
+        return None
+
+    result = {
+        "session_date": None,
+        "session_number": None,
+        "votes": {},
+        "metadata": {
+            "url": url,
+            "parsed_text": text[:500],
+        }
+    }
+
+    # Try to extract session date from text
+    # Look for patterns like "25 Listopada 2024 r." or similar
+    date_match = re.search(
+        r'(\d{1,2})\s+(\w+)\s+(\d{4})\s*r\.?',
+        text,
+        re.IGNORECASE
+    )
+    if date_match:
+        day = date_match.group(1)
+        month = date_match.group(2).lower()
+        year = date_match.group(3)
+        month_num = MONTHS_PL.get(month, 0)
+        if month_num:
+            result["session_date"] = f"{year}-{month_num:02d}-{int(day):02d}"
+
+    # Try to extract session number from text
+    # Look for "Sesja nr VI" or similar
+    session_match = re.search(
+        r'[Ss]esja\s+(?:nr\.?\s+)?([IVXLCDM]+)',
+        text
+    )
+    if session_match:
+        result["session_number"] = session_match.group(1).upper()
+
+    # Parse voting table
+    # Look for lines with names and votes
+    # Pattern: "Lp. / Nazwisko i imię / Głos" table
+    lines = text.split('\n')
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+
+        # Look for vote patterns: ZA, PRZECIW, WSTRZYMUJĘ SIĘ, NIEOBECNY
+        if 'ZA' in line.upper() or 'PRZECIW' in line.upper() or 'WSTRZYMUJĘ' in line.upper() or 'NIEOBECNY' in line.upper():
+            # Try to extract name and vote
+            # This is a simplified pattern — may need adjustment based on actual PDF format
+            parts = line.split()
+            if len(parts) >= 2:
+                # Assume last word is the vote
+                vote_str = parts[-1].upper()
+                name_parts = parts[:-1]
+
+                vote = None
+                if 'ZA' == vote_str:
+                    vote = 'za'
+                elif 'PRZECIW' in vote_str:
+                    vote = 'przeciw'
+                elif 'WSTRZYMUJĘ' in vote_str or 'WSTRZYM' in vote_str:
+                    vote = 'wstrzymal_sie'
+                elif 'NIEOBECNY' in vote_str or 'NIEOBECNA' in vote_str:
+                    vote = 'nieobecny'
+
+                if vote and name_parts:
+                    name = ' '.join(name_parts).strip()
+                    if name and len(name) > 2:  # Filter out garbage
+                        club = COUNCILORS.get(name, "")
+                        result["votes"][name] = {
+                            "vote": vote,
+                            "club": club,
+                        }
+
+    return result if result["session_date"] else None
+
+
+# ---------------------------------------------------------------------------
+# Step 3: Build data.json
+# ---------------------------------------------------------------------------
+
+def build_data_json(voting_records: list[dict]) -> dict:
+    """Buduje strukturę data.json na podstawie zebranych danych głosowań."""
+
+    data = {
+        "generated": datetime.utcnow().isoformat(),
+        "default_kadencja": "2024-2029",
+        "kadencje": [
+            {
+                "id": "2024-2029",
+                "label": "IX kadencja (2024–2029)",
+                "clubs": {
+                    "KO": 0,
+                    "PiS": 0,
+                },
+                "sessions": [],
+            }
+        ]
+    }
+
+    # Group voting records by session
+    sessions_by_date = {}
+    all_attendees = set()
+
+    for record in voting_records:
+        session_date = record.get("session_date")
+        if not session_date:
+            continue
+
+        if session_date not in sessions_by_date:
+            sessions_by_date[session_date] = {
+                "date": session_date,
+                "number": record.get("session_number", "?"),
+                "votes": [],
+                "attendees": set(),
+                "speakers": [],
+            }
+
+        for name, vote_info in record.get("votes", {}).items():
+            sessions_by_date[session_date]["votes"].append({
+                "councillor": name,
+                "vote": vote_info["vote"],
+            })
+            if vote_info["vote"] != "nieobecny":
+                sessions_by_date[session_date]["attendees"].add(name)
+                all_attendees.add(name)
+
+    # Count clubs
+    club_counts = Counter()
+    for name in all_attendees:
+        club = COUNCILORS.get(name, "")
+        if club:
+            club_counts[club] += 1
+
+    data["kadencje"][0]["clubs"] = dict(club_counts)
+
+    # Build sessions list
+    for session_date in sorted(sessions_by_date.keys()):
+        session = sessions_by_date[session_date]
+
+        # Group votes by councillor
+        vote_by_councillor = {}
+        for v in session["votes"]:
+            councillor = v["councillor"]
+            if councillor not in vote_by_councillor:
+                vote_by_councillor[councillor] = {
+                    "votes": [],
+                    "vote": v["vote"],
+                }
+            vote_by_councillor[councillor]["votes"].append(v["vote"])
+
+        # Prepare session record
+        session_record = {
+            "date": session["date"],
+            "number": session["number"],
+            "vote_count": len(set(c for c in vote_by_councillor.keys()
+                                 if any(v != "nieobecny" for v in vote_by_councillor[c]["votes"]))),
+            "attendee_count": len(session["attendees"]),
+            "attendees": sorted(list(session["attendees"])),
+            "speakers": session["speakers"],
+        }
+
+        data["kadencje"][0]["sessions"].append(session_record)
+
+    # Sort sessions by date
+    data["kadencje"][0]["sessions"].sort(key=lambda x: x["date"], reverse=True)
+
+    return data
+
+
+# ---------------------------------------------------------------------------
+# Step 4: Build profiles.json
+# ---------------------------------------------------------------------------
+
+def make_slug(name: str) -> str:
+    """Create URL-safe slug from Polish name."""
+    replacements = {
+        'ą': 'a', 'ć': 'c', 'ę': 'e', 'ł': 'l', 'ń': 'n',
+        'ó': 'o', 'ś': 's', 'ź': 'z', 'ż': 'z',
+        'Ą': 'A', 'Ć': 'C', 'Ę': 'E', 'Ł': 'L', 'Ń': 'N',
+        'Ó': 'O', 'Ś': 'S', 'Ź': 'Z', 'Ż': 'Z',
+    }
+    slug = name.lower()
+    for pl, ascii_c in replacements.items():
+        slug = slug.replace(pl, ascii_c)
+    slug = slug.replace(' ', '-').replace("'", "")
+    return slug
+
+
+def build_profiles_json(voting_records: list[dict]) -> dict:
+    """Buduje strukturę profiles.json na podstawie danych głosowań."""
+
+    profiles_dict = {}
+
+    councillor_votes = defaultdict(lambda: {
+        "za": 0,
+        "przeciw": 0,
+        "wstrzymal_sie": 0,
+        "nieobecny": 0,
+        "brak": 0,
+        "votes": [],
+    })
+
+    for record in voting_records:
+        session_date = record.get("session_date")
+        if not session_date:
+            continue
+
+        for name, vote_info in record.get("votes", {}).items():
+            vote = vote_info["vote"]
+            councillor_votes[name][vote] += 1
+            councillor_votes[name]["votes"].append({
+                "session": session_date,
+                "vote": vote,
+            })
+
+    for councillor_name in sorted(councillor_votes.keys()):
+        club = COUNCILORS.get(councillor_name, "")
+        votes_data = councillor_votes[councillor_name]
+
+        votes_total = sum(votes_data[k] for k in ["za", "przeciw", "wstrzymal_sie", "nieobecny"])
+
+        if votes_total == 0:
+            votes_total = 1
+
+        frekwencja = 100.0 * (votes_total - votes_data["nieobecny"]) / votes_total if votes_total > 0 else 0.0
+        zgodnosc = 0.0
+
+        profile = {
+            "name": councillor_name,
+            "slug": make_slug(councillor_name),
+            "kadencje": {
+                "2024-2029": {
+                    "club": club if club else "Niezrzeszony",
+                    "has_voting_data": True,
+                    "has_activity_data": False,
+                    "frekwencja": round(frekwencja, 1),
+                    "aktywnosc": 0.0,
+                    "zgodnosc_z_klubem": round(zgodnosc, 1),
+                    "votes_za": votes_data["za"],
+                    "votes_przeciw": votes_data["przeciw"],
+                    "votes_wstrzymal": votes_data["wstrzymal_sie"],
+                    "votes_brak": votes_data["brak"],
+                    "votes_nieobecny": votes_data["nieobecny"],
+                    "votes_total": votes_total,
+                    "rebellion_count": 0,
+                    "rebellions": [],
+                    "roles": [],
+                    "notes": "",
+                    "former": False,
+                    "mid_term": False,
+                }
+            }
+        }
+
+        profiles_dict[councillor_name] = profile
+
+    return {
+        "profiles": list(profiles_dict.values())
+    }
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def scrape(output_data_path: str, output_profiles_path: str):
+    """Główna funkcja scrapowania."""
+
+    print("\n=== Scraper głosowań Rady Miasta Bydgoszczy ===\n")
+
+    # Step 1: Get list of PDFs
+    pdf_links = scrape_voting_list()
+    if not pdf_links:
+        print("  BŁĄD: Nie znaleziono żadnych PDF-ów!")
+        return
+
+    # Step 2: Download and parse each PDF
+    cache_dir = Path("pdfs")
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    voting_records = []
+    for i, pdf_info in enumerate(pdf_links):
+        url = pdf_info["url"]
+        title = pdf_info["title"]
+
+        print(f"  [{i+1}/{len(pdf_links)}] {title}")
+
+        try:
+            pdf_path = download_pdf(url, cache_dir)
+            if not pdf_path:
+                print(f"    ✗ Nie udało się pobrać PDF")
+                continue
+            pdf_data = pdf_path.read_bytes()
+            record = parse_voting_pdf(pdf_data, url)
+            if record:
+                voting_records.append(record)
+                print(f"    ✓ Sesja: {record['session_date']} (nr {record['session_number']}), "
+                      f"{len(record['votes'])} głosów")
+            else:
+                print(f"    ✗ Nie udało się sparsować")
+        except Exception as e:
+            print(f"    BŁĄD: {e}")
+
+        time.sleep(DELAY)
+
+    print(f"\n  Pobrano: {len(voting_records)} sesji\n")
+
+    # Step 3: Build data.json
+    print("  Buduję data.json...")
+    data = build_data_json(voting_records)
+
+    Path(output_data_path).parent.mkdir(parents=True, exist_ok=True)
+    save_split_output(data, output_data_path)
+
+    size_kb = Path(output_data_path).stat().st_size / 1024
+    print(f"  Zapisano: {output_data_path} ({size_kb:.1f} KB)")
+
+    # Step 4: Build profiles.json
+    print("  Buduję profiles.json...")
+    profiles = build_profiles_json(voting_records)
+
+    Path(output_profiles_path).parent.mkdir(parents=True, exist_ok=True)
+    with open(output_profiles_path, "w", encoding="utf-8") as f:
+        json.dump(profiles, f, ensure_ascii=False, indent=2)
+
+    size_kb = Path(output_profiles_path).stat().st_size / 1024
+    print(f"  Zapisano: {output_profiles_path} ({size_kb:.1f} KB)")
+
+    print("\n✓ Scrapowanie zakończone!")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Scraper danych głosowań Rady Miasta Bydgoszczy"
+    )
+    parser.add_argument(
+        "--output", default="docs/data.json",
+        help="Ścieżka do pliku data.json (domyślnie: docs/data.json)"
+    )
+    parser.add_argument(
+        "--profiles", default="docs/profiles.json",
+        help="Ścieżka do pliku profiles.json (domyślnie: docs/profiles.json)"
+    )
+    args = parser.parse_args()
+
+    scrape(
+        output_data_path=args.output,
+        output_profiles_path=args.profiles,
+    )
+
+
+if __name__ == "__main__":
+    main()
