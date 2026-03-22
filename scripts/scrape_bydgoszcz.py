@@ -118,6 +118,23 @@ MONTHS_PL = {
     "września": 9, "października": 10, "listopada": 11, "grudnia": 12,
 }
 
+# Build a reverse lookup so "Lastname Firstname" also resolves to a club.
+# PDFs use "Lastname Firstname" while COUNCILORS uses "Firstname Lastname".
+def _build_name_lookup(councilors: dict[str, str]) -> dict[str, str]:
+    lookup = {}
+    for name, club in councilors.items():
+        lookup[name] = club
+        parts = name.split()
+        if len(parts) == 2:
+            lookup[f"{parts[1]} {parts[0]}"] = club
+        elif len(parts) == 3:
+            # Handle e.g. "Joanna Czerska-Thomas" -> "Czerska-Thomas Joanna"
+            lookup[f"{parts[1]} {parts[2]} {parts[0]}"] = club
+            lookup[f"{parts[2]} {parts[1]} {parts[0]}"] = club
+    return lookup
+
+COUNCILOR_LOOKUP = _build_name_lookup(COUNCILORS)
+
 
 # ---------------------------------------------------------------------------
 # HTTP helpers
@@ -295,102 +312,148 @@ def extract_text_from_pdf(pdf_data: bytes) -> str:
         return ""
 
 
-def parse_voting_pdf(pdf_data: bytes, url: str) -> dict | None:
-    """Parsuje PDF z wynikami głosowania.
+def _classify_vote(line: str) -> str | None:
+    """Classify a standalone vote line. Returns vote key or None."""
+    t = line.strip().upper()
+    if t == "ZA":
+        return "za"
+    if t == "PRZECIW":
+        return "przeciw"
+    if t in ("WSTRZYMUJĘ SIĘ", "WSTRZYMUJE SIE"):
+        return "wstrzymal_sie"
+    if t in ("NIEOBECNY", "NIEOBECNA"):
+        return "nieobecny"
+    if t == "NIEODDANY":
+        return "nieoddany"
+    return None
 
-    Zwraca dict z:
-      - session_date: "2024-MM-DD"
-      - session_number: "VI" (Roman numeral)
-      - votes: {
-          "full_name": {
-            "vote": "za|przeciw|wstrzymal_sie|nieobecny",
-            "club": "KO|PiS|..." (if known)
-          },
-          ...
-        }
-      - metadata: {
-          "url": pdf_url,
-          "parsed_text": raw text (first 500 chars for debugging)
-        }
+
+def _is_row_number(line: str) -> bool:
+    """Check if line is a table row number like '1.' or '15.'."""
+    return bool(re.match(r'^\d{1,2}\.$', line.strip()))
+
+
+def _parse_single_page(page_text: str, url: str) -> dict | None:
+    """Parse a single page of voting results.
+
+    Each page in the Bydgoszcz BIP PDF represents one vote.
+    The text structure (from PyMuPDF) is one element per line:
+      - row number (e.g. "1.")
+      - councillor name (e.g. "Bielawa Wojciech")
+      - vote (e.g. "ZA")
+    repeating in two-column order (left column items, then right column items,
+    interleaved line by line).
+
+    Returns dict with session_date, session_number, vote_title, votes, metadata
+    or None if parsing fails.
     """
-    text = extract_text_from_pdf(pdf_data)
-    if not text:
-        return None
-
     result = {
         "session_date": None,
         "session_number": None,
+        "vote_title": None,
         "votes": {},
         "metadata": {
             "url": url,
-            "parsed_text": text[:500],
+            "parsed_text": page_text[:500],
         }
     }
 
-    # Try to extract session date from text
-    # Look for patterns like "25 Listopada 2024 r." or similar
+    # Extract date from "Data głosowania:  DD.MM.YYYY HH:MM"
     date_match = re.search(
-        r'(\d{1,2})\s+(\w+)\s+(\d{4})\s*r\.?',
-        text,
-        re.IGNORECASE
+        r'Data g\u0142osowania:\s*(\d{2})\.(\d{2})\.(\d{4})',
+        page_text
     )
     if date_match:
-        day = date_match.group(1)
-        month = date_match.group(2).lower()
-        year = date_match.group(3)
-        month_num = MONTHS_PL.get(month, 0)
-        if month_num:
-            result["session_date"] = f"{year}-{month_num:02d}-{int(day):02d}"
+        day, month, year = date_match.group(1), date_match.group(2), date_match.group(3)
+        result["session_date"] = f"{year}-{month}-{day}"
 
-    # Try to extract session number from text
-    # Look for "Sesja nr VI" or similar
+    # Fallback: Polish text date "25 Listopada 2024 r."
+    if not result["session_date"]:
+        date_match2 = re.search(
+            r'(\d{1,2})\s+(\w+)\s+(\d{4})\s*r\.?',
+            page_text,
+            re.IGNORECASE
+        )
+        if date_match2:
+            day = date_match2.group(1)
+            month_name = date_match2.group(2).lower()
+            year = date_match2.group(3)
+            month_num = MONTHS_PL.get(month_name, 0)
+            if month_num:
+                result["session_date"] = f"{year}-{month_num:02d}-{int(day):02d}"
+
+    # Extract session number: "VIII Sesja Rady Miasta" (number before Sesja)
     session_match = re.search(
-        r'[Ss]esja\s+(?:nr\.?\s+)?([IVXLCDM]+)',
-        text
+        r'([IVXLCDM]+)\s+[Ss]esja\b',
+        page_text
     )
+    if not session_match:
+        # Fallback: "Sesja nr VI" or "Sesja VIII"
+        session_match = re.search(
+            r'[Ss]esja\s+(?:nr\.?\s+)?([IVXLCDM]+)',
+            page_text
+        )
     if session_match:
         result["session_number"] = session_match.group(1).upper()
 
-    # Parse voting table
-    # Look for lines with names and votes
-    # Pattern: "Lp. / Nazwisko i imię / Głos" table
-    lines = text.split('\n')
+    # Extract vote title (the agenda item being voted on)
+    # It appears after the voting number line, e.g.:
+    #   "1"  (vote sequence number)
+    #   "3. Powołanie Komisji Uchwał i Wniosków."
+    lines = page_text.split('\n')
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if re.match(r'^\d+\.\s+', stripped) and 'Sesja' not in stripped:
+            # Likely an agenda item title
+            if i > 0 and lines[i - 1].strip().isdigit():
+                result["vote_title"] = stripped
+                break
 
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-
-        # Look for vote patterns: ZA, PRZECIW, WSTRZYMUJĘ SIĘ, NIEOBECNY
-        if 'ZA' in line.upper() or 'PRZECIW' in line.upper() or 'WSTRZYMUJĘ' in line.upper() or 'NIEOBECNY' in line.upper():
-            # Try to extract name and vote
-            # This is a simplified pattern — may need adjustment based on actual PDF format
-            parts = line.split()
-            if len(parts) >= 2:
-                # Assume last word is the vote
-                vote_str = parts[-1].upper()
-                name_parts = parts[:-1]
-
-                vote = None
-                if 'ZA' == vote_str:
-                    vote = 'za'
-                elif 'PRZECIW' in vote_str:
-                    vote = 'przeciw'
-                elif 'WSTRZYMUJĘ' in vote_str or 'WSTRZYM' in vote_str:
-                    vote = 'wstrzymal_sie'
-                elif 'NIEOBECNY' in vote_str or 'NIEOBECNA' in vote_str:
-                    vote = 'nieobecny'
-
-                if vote and name_parts:
-                    name = ' '.join(name_parts).strip()
-                    if name and len(name) > 2:  # Filter out garbage
-                        club = COUNCILORS.get(name, "")
-                        result["votes"][name] = {
-                            "vote": vote,
-                            "club": club,
-                        }
+    # Parse voting table: sequence of (row_number, name, vote) triplets
+    # Lines appear as: "1.", "Bielawa Wojciech", "ZA", "15.", "Mikołajczak Jakub", "ZA", ...
+    i = 0
+    while i < len(lines):
+        stripped = lines[i].strip()
+        if _is_row_number(stripped):
+            # Next line should be the name, line after that the vote
+            if i + 2 < len(lines):
+                name_line = lines[i + 1].strip()
+                vote_line = lines[i + 2].strip()
+                vote = _classify_vote(vote_line)
+                if vote and name_line and len(name_line) > 2:
+                    club = COUNCILOR_LOOKUP.get(name_line, "")
+                    result["votes"][name_line] = {
+                        "vote": vote,
+                        "club": club,
+                    }
+                    i += 3
+                    continue
+        i += 1
 
     return result if result["session_date"] else None
+
+
+def parse_voting_pdf(pdf_data: bytes, url: str) -> list[dict]:
+    """Parse a PDF with voting results. Returns a list of vote records (one per page).
+
+    Each page in the Bydgoszcz BIP PDFs is a separate vote (agenda item).
+    """
+    try:
+        doc = fitz.open(stream=pdf_data, filetype="pdf")
+    except Exception as e:
+        print(f"    Blad przy otwieraniu PDF: {e}")
+        return []
+
+    records = []
+    for page in doc:
+        text = page.get_text()
+        if not text.strip():
+            continue
+        record = _parse_single_page(text, url)
+        if record:
+            records.append(record)
+
+    return records
 
 
 # ---------------------------------------------------------------------------
@@ -401,7 +464,7 @@ def build_data_json(voting_records: list[dict]) -> dict:
     """Buduje strukturę data.json na podstawie zebranych danych głosowań."""
 
     data = {
-        "generated": datetime.utcnow().isoformat(),
+        "generated": datetime.now().isoformat(),
         "default_kadencja": "2024-2029",
         "kadencje": [
             {
@@ -446,7 +509,7 @@ def build_data_json(voting_records: list[dict]) -> dict:
     # Count clubs
     club_counts = Counter()
     for name in all_attendees:
-        club = COUNCILORS.get(name, "")
+        club = COUNCILOR_LOOKUP.get(name, "")
         if club:
             club_counts[club] += 1
 
@@ -515,6 +578,7 @@ def build_profiles_json(voting_records: list[dict]) -> dict:
         "przeciw": 0,
         "wstrzymal_sie": 0,
         "nieobecny": 0,
+        "nieoddany": 0,
         "brak": 0,
         "votes": [],
     })
@@ -533,10 +597,10 @@ def build_profiles_json(voting_records: list[dict]) -> dict:
             })
 
     for councillor_name in sorted(councillor_votes.keys()):
-        club = COUNCILORS.get(councillor_name, "")
+        club = COUNCILOR_LOOKUP.get(councillor_name, "")
         votes_data = councillor_votes[councillor_name]
 
-        votes_total = sum(votes_data[k] for k in ["za", "przeciw", "wstrzymal_sie", "nieobecny"])
+        votes_total = sum(votes_data[k] for k in ["za", "przeciw", "wstrzymal_sie", "nieobecny", "nieoddany"])
 
         if votes_total == 0:
             votes_total = 1
@@ -607,16 +671,16 @@ def scrape(output_data_path: str, output_profiles_path: str):
         try:
             pdf_path = download_pdf(url, cache_dir)
             if not pdf_path:
-                print(f"    ✗ Nie udało się pobrać PDF")
+                print(f"    ✗ Nie udalo sie pobrac PDF")
                 continue
             pdf_data = pdf_path.read_bytes()
-            record = parse_voting_pdf(pdf_data, url)
-            if record:
-                voting_records.append(record)
-                print(f"    ✓ Sesja: {record['session_date']} (nr {record['session_number']}), "
-                      f"{len(record['votes'])} głosów")
+            records = parse_voting_pdf(pdf_data, url)
+            if records:
+                voting_records.extend(records)
+                print(f"    ✓ Sesja: {records[0]['session_date']} (nr {records[0]['session_number']}), "
+                      f"{len(records)} glosowan")
             else:
-                print(f"    ✗ Nie udało się sparsować")
+                print(f"    ✗ Nie udalo sie sparsowac")
         except Exception as e:
             print(f"    BŁĄD: {e}")
 
