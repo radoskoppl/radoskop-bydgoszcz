@@ -42,12 +42,14 @@ except ImportError:
 
 BASE_URL = "https://bip.um.bydgoszcz.pl"
 
-# Interpelacje w BIP Bydgoszcz są dostępne w wyszukiwarce
-INTERPELACJE_SEARCH_URL = f"{BASE_URL}/interpelacje/szukaj"
+# Interpelacje listing: /interpelacje/{page}/{perPage}
+# The first page is at /interpelacje/1475 (BIP article ID for IX kadencja).
+# Pagination: /interpelacje/{page}/{perPage}
+INTERPELACJE_LIST_URL = f"{BASE_URL}/interpelacje"
 
 KADENCJE = {
-    "IX":   {"term_id": 4, "label": "IX kadencja (2024–2029)"},
-    "VIII": {"term_id": 3, "label": "VIII kadencja (2018–2024)"},
+    "IX":   {"list_id": 1475, "label": "IX kadencja (2024-2029)"},
+    "VIII": {"list_id": None, "label": "VIII kadencja (2018-2024)"},
 }
 
 HEADERS = {
@@ -66,37 +68,28 @@ MONTHS_PL = {
 
 
 # ---------------------------------------------------------------------------
-# Scraping — list page via search endpoint
+# Scraping: list page at /interpelacje/{page}/{perPage}
 # ---------------------------------------------------------------------------
 
-def fetch_search_page(session, term_id, page, type_id=None, status_id=None, debug=False):
-    """Pobiera stronę wyników wyszukiwania interpelacji."""
-    url = f"{BASE_URL}/interpelacje/szukaj"
-    params = {
-        "term_id": term_id,
-        "perPage": PER_PAGE,
-        "page": page,
-    }
-    if type_id and type_id > 0:
-        params["type_id"] = type_id
-    if status_id and status_id > 0:
-        params["status_id"] = status_id
-
+def fetch_list_page(http_session, page, per_page=PER_PAGE, debug=False):
+    """Fetch a page of the interpelacje listing."""
+    url = f"{INTERPELACJE_LIST_URL}/{page}/{per_page}"
     if debug:
-        print(f"  [DEBUG] GET {url} params={params}")
-
-    resp = session.get(url, headers=HEADERS, params=params, timeout=30)
+        print(f"  [DEBUG] GET {url}")
+    resp = http_session.get(url, headers=HEADERS, timeout=30)
     resp.raise_for_status()
     return resp.text
 
 
 def parse_list_page(html, kadencja_name, debug=False):
-    """Parsuje stronę listy interpelacji.
+    """Parse the interpelacje listing page.
 
-    Każda interpelacja to osobna <table> z wierszami <th> + <td>:
-      - Interpelacja/Zapytanie w sprawie: <link> tytuł
-      - Tożsamość radnego: imię nazwisko
-      - Status interpelacji: oczekuje na odpowiedź / udzielono odpowiedzi
+    BIP Bydgoszcz lists interpelacje as table rows with th+td pairs.
+    Each interpelacja entry has:
+      - Title with link to /interpelacja/{id}/{slug}
+      - Nr sprawy (case number)
+      - Councillor name
+    Pagination links use /interpelacje/{page}/{perPage} format.
     """
     soup = BeautifulSoup(html, "html.parser")
     main = soup.find("main") or soup
@@ -119,7 +112,6 @@ def parse_list_page(html, kadencja_name, debug=False):
             val_text = td.get_text(strip=True)
 
             if "w sprawie" in label:
-                # Subject — extract link and title
                 a = td.find("a")
                 if a:
                     record["przedmiot"] = a.get_text(strip=True)
@@ -128,14 +120,12 @@ def parse_list_page(html, kadencja_name, debug=False):
                         record["bip_url"] = BASE_URL + href
                     elif href.startswith("http"):
                         record["bip_url"] = href
-                    # Extract article_id from /interpelacja/{id}/{slug}
                     m = re.search(r"/interpelacja/(\d+)/", href)
                     if m:
                         record["article_id"] = int(m.group(1))
                 else:
                     record["przedmiot"] = val_text
 
-                # Determine type from label text
                 if "zapytanie" in label:
                     record["typ"] = "zapytanie"
                 elif "wniosek" in label:
@@ -143,8 +133,11 @@ def parse_list_page(html, kadencja_name, debug=False):
                 else:
                     record["typ"] = "interpelacja"
 
-            elif "tożsamość" in label or "radnego" in label or "radnej" in label:
+            elif any(k in label for k in ["tożsamość", "radnego", "radnej", "autor"]):
                 record["radny"] = val_text
+
+            elif "nr sprawy" in label or "numer" in label:
+                record["nr_sprawy"] = val_text
 
             elif "status" in label:
                 record["status"] = val_text
@@ -155,20 +148,56 @@ def parse_list_page(html, kadencja_name, debug=False):
             record.setdefault("bip_url", "")
             record.setdefault("article_id", 0)
             record.setdefault("typ", "interpelacja")
+            record.setdefault("nr_sprawy", "")
             record["kadencja"] = kadencja_name
             records.append(record)
 
-    # Extract total pages from pagination
+    # If no table-based records found, try link-based parsing as fallback.
+    # Some BIP pages list interpelacje as plain links with metadata text.
+    if not records:
+        for a in main.find_all("a", href=True):
+            href = a.get("href", "")
+            if "/interpelacja/" not in href:
+                continue
+            text = a.get_text(strip=True)
+            if not text or len(text) < 5:
+                continue
+
+            record = {"przedmiot": text, "typ": "interpelacja", "kadencja": kadencja_name}
+            if href.startswith("/"):
+                record["bip_url"] = BASE_URL + href
+            else:
+                record["bip_url"] = href
+            m = re.search(r"/interpelacja/(\d+)/", href)
+            if m:
+                record["article_id"] = int(m.group(1))
+
+            # Look for sibling text with case number and councillor name
+            parent = a.parent
+            if parent:
+                siblings_text = parent.get_text(separator="|")
+                # Try to find "Nr sprawy: RM.0003..." pattern
+                nr_match = re.search(r'(?:Nr sprawy|RM)\S*[\s:]*([A-Z]{2}\.\d[\d.]+\d{4})', siblings_text)
+                if nr_match:
+                    record["nr_sprawy"] = nr_match.group(1)
+
+            record.setdefault("radny", "")
+            record.setdefault("status", "")
+            record.setdefault("bip_url", "")
+            record.setdefault("article_id", 0)
+            record.setdefault("nr_sprawy", "")
+            records.append(record)
+
+    # Extract total pages from pagination links: /interpelacje/{page}/{perPage}
     total_pages = 1
-    # Look for "następna strona" link to extract page numbers
-    for a in soup.find_all("a"):
+    for a in soup.find_all("a", href=True):
         href = a.get("href", "")
-        m = re.search(r"[?&]page=(\d+)", href)
+        m = re.search(r'/interpelacje/(\d+)/\d+', href)
         if m:
             p = int(m.group(1))
             if p > total_pages:
                 total_pages = p
-    # Also check for numbered page links
+    # Also check plain page number links
     for a in soup.find_all("a"):
         txt = a.get_text(strip=True)
         if re.match(r"^\d+$", txt):
@@ -318,8 +347,12 @@ def scrape(kadencje, output_path, fetch_details=True, debug=False):
             print(f"Nieznana kadencja: {kad_name}")
             continue
 
-        term_id = kad["term_id"]
-        print(f"\n=== {kad['label']} (term_id={term_id}) ===")
+        list_id = kad.get("list_id")
+        if not list_id:
+            print(f"  Brak list_id dla kadencji {kad_name}, pomijam")
+            continue
+
+        print(f"\n=== {kad['label']} ===")
 
         page = 1
         total_pages = None
@@ -327,20 +360,20 @@ def scrape(kadencje, output_path, fetch_details=True, debug=False):
 
         while True:
             try:
-                html = fetch_search_page(session, term_id, page, debug=debug)
+                html = fetch_list_page(session, page, PER_PAGE, debug=debug)
                 records, pages = parse_list_page(html, kad_name, debug=debug)
             except Exception as e:
-                print(f"  BŁĄD na stronie {page}: {e}")
+                print(f"  BLAD na stronie {page}: {e}")
                 break
 
             if total_pages is None:
                 total_pages = max(pages, 1)
-                print(f"  Łącznie stron: {total_pages}")
+                print(f"  Lacznie stron: {total_pages}")
 
             kad_records.extend(records)
 
             if debug:
-                print(f"  Strona {page}/{total_pages}: {len(records)} rekordów")
+                print(f"  Strona {page}/{total_pages}: {len(records)} rekordow")
             elif page % 10 == 0:
                 print(f"  Strona {page}/{total_pages}...")
 
@@ -350,7 +383,7 @@ def scrape(kadencje, output_path, fetch_details=True, debug=False):
             page += 1
             time.sleep(DELAY)
 
-        print(f"  Pobrano: {len(kad_records)} rekordów")
+        print(f"  Pobrano: {len(kad_records)} rekordow")
 
         # Optionally fetch details for each record
         if fetch_details:
