@@ -460,93 +460,230 @@ def parse_voting_pdf(pdf_data: bytes, url: str) -> list[dict]:
 # Step 3: Build data.json
 # ---------------------------------------------------------------------------
 
+def _compute_club_majority(vote_record: dict) -> dict:
+    """For a single vote record, compute majority vote per club."""
+    club_votes = defaultdict(lambda: defaultdict(int))
+    for name, info in vote_record.get("votes", {}).items():
+        club = COUNCILOR_LOOKUP.get(name, "")
+        if club and info["vote"] not in ("nieobecny",):
+            club_votes[club][info["vote"]] += 1
+    result = {}
+    for club, cats in club_votes.items():
+        if cats:
+            result[club] = max(cats, key=cats.get)
+    return result
+
+
 def build_data_json(voting_records: list[dict]) -> dict:
     """Buduje strukturę data.json na podstawie zebranych danych głosowań."""
 
-    data = {
-        "generated": datetime.now().isoformat(),
-        "default_kadencja": "2024-2029",
-        "kadencje": [
-            {
-                "id": "2024-2029",
-                "label": "IX kadencja (2024–2029)",
-                "clubs": {
-                    "KO": 0,
-                    "PiS": 0,
-                },
-                "sessions": [],
-            }
-        ]
-    }
-
-    # Group voting records by session
-    sessions_by_date = {}
-    all_attendees = set()
-
+    # Convert each voting record to the named_votes format the template expects
+    all_votes = []
+    vote_id_counter = 0
     for record in voting_records:
         session_date = record.get("session_date")
         if not session_date:
             continue
 
-        if session_date not in sessions_by_date:
-            sessions_by_date[session_date] = {
-                "date": session_date,
-                "number": record.get("session_number", "?"),
-                "votes": [],
+        named_votes = {
+            "za": [],
+            "przeciw": [],
+            "wstrzymal_sie": [],
+            "brak_glosu": [],
+            "nieobecni": [],
+        }
+        counts = {"za": 0, "przeciw": 0, "wstrzymal_sie": 0, "brak_glosu": 0, "nieobecni": 0}
+
+        for name, info in record.get("votes", {}).items():
+            v = info["vote"]
+            cat = {
+                "za": "za",
+                "przeciw": "przeciw",
+                "wstrzymal_sie": "wstrzymal_sie",
+                "nieobecny": "nieobecni",
+            }.get(v, "brak_glosu")
+            named_votes[cat].append(name)
+            counts[cat] += 1
+
+        vote_id_counter += 1
+        all_votes.append({
+            "id": str(vote_id_counter),
+            "session_date": session_date,
+            "session_number": record.get("session_number", ""),
+            "topic": record.get("vote_title", "") or "",
+            "named_votes": named_votes,
+            "counts": {
+                "za": counts["za"],
+                "przeciw": counts["przeciw"],
+                "wstrzymal_sie": counts["wstrzymal_sie"],
+            },
+        })
+
+    # Build sessions
+    sessions_by_date = {}
+    for v in all_votes:
+        d = v["session_date"]
+        if d not in sessions_by_date:
+            sessions_by_date[d] = {
+                "date": d,
+                "number": v.get("session_number", ""),
+                "vote_count": 0,
                 "attendees": set(),
                 "speakers": [],
             }
+        sessions_by_date[d]["vote_count"] += 1
+        for cat in ["za", "przeciw", "wstrzymal_sie", "brak_glosu"]:
+            sessions_by_date[d]["attendees"].update(v["named_votes"].get(cat, []))
 
-        for name, vote_info in record.get("votes", {}).items():
-            sessions_by_date[session_date]["votes"].append({
-                "councillor": name,
-                "vote": vote_info["vote"],
-            })
-            if vote_info["vote"] != "nieobecny":
-                sessions_by_date[session_date]["attendees"].add(name)
-                all_attendees.add(name)
+    sessions_data = []
+    for d in sorted(sessions_by_date.keys()):
+        s = sessions_by_date[d]
+        sessions_data.append({
+            "date": s["date"],
+            "number": s["number"],
+            "vote_count": s["vote_count"],
+            "attendee_count": len(s["attendees"]),
+            "attendees": sorted(s["attendees"]),
+            "speakers": s["speakers"],
+        })
 
-    # Count clubs
-    club_counts = Counter()
-    for name in all_attendees:
-        club = COUNCILOR_LOOKUP.get(name, "")
-        if club:
-            club_counts[club] += 1
+    # Build councilors with per-person vote stats
+    all_names = set()
+    for v in all_votes:
+        for cat_names in v["named_votes"].values():
+            all_names.update(cat_names)
 
-    data["kadencje"][0]["clubs"] = dict(club_counts)
-
-    # Build sessions list
-    for session_date in sorted(sessions_by_date.keys()):
-        session = sessions_by_date[session_date]
-
-        # Group votes by councillor
-        vote_by_councillor = {}
-        for v in session["votes"]:
-            councillor = v["councillor"]
-            if councillor not in vote_by_councillor:
-                vote_by_councillor[councillor] = {
-                    "votes": [],
-                    "vote": v["vote"],
-                }
-            vote_by_councillor[councillor]["votes"].append(v["vote"])
-
-        # Prepare session record
-        session_record = {
-            "date": session["date"],
-            "number": session["number"],
-            "vote_count": len(set(c for c in vote_by_councillor.keys()
-                                 if any(v != "nieobecny" for v in vote_by_councillor[c]["votes"]))),
-            "attendee_count": len(session["attendees"]),
-            "attendees": sorted(list(session["attendees"])),
-            "speakers": session["speakers"],
+    councilors_data = {}
+    for name in sorted(all_names):
+        club = COUNCILOR_LOOKUP.get(name, "Niezrzeszony")
+        councilors_data[name] = {
+            "name": name,
+            "club": club,
+            "district": None,
+            "votes_za": 0,
+            "votes_przeciw": 0,
+            "votes_wstrzymal": 0,
+            "votes_brak": 0,
+            "votes_nieobecny": 0,
+            "votes_with_club": 0,
+            "votes_against_club": 0,
+            "rebellions": [],
         }
 
-        data["kadencje"][0]["sessions"].append(session_record)
+    for record in voting_records:
+        if not record.get("session_date"):
+            continue
+        club_majority = _compute_club_majority(record)
+        for name, info in record.get("votes", {}).items():
+            if name not in councilors_data:
+                continue
+            c = councilors_data[name]
+            v = info["vote"]
+            if v == "za":
+                c["votes_za"] += 1
+            elif v == "przeciw":
+                c["votes_przeciw"] += 1
+            elif v == "wstrzymal_sie":
+                c["votes_wstrzymal"] += 1
+            elif v == "nieobecny":
+                c["votes_nieobecny"] += 1
+            else:
+                c["votes_brak"] += 1
 
-    # Sort sessions by date
-    data["kadencje"][0]["sessions"].sort(key=lambda x: x["date"], reverse=True)
+            # Rebellion check
+            cat = {"za": "za", "przeciw": "przeciw", "wstrzymal_sie": "wstrzymal_sie"}.get(v)
+            if cat:
+                club = c["club"]
+                if club and club != "Niezrzeszony" and club in club_majority:
+                    if cat == club_majority[club]:
+                        c["votes_with_club"] += 1
+                    else:
+                        c["votes_against_club"] += 1
+                        c["rebellions"].append({
+                            "vote_id": "",
+                            "session": record.get("session_date", ""),
+                            "topic": (record.get("vote_title") or "")[:120],
+                            "their_vote": cat,
+                            "club_majority": club_majority[club],
+                        })
 
-    return data
+    total_votes_count = len(all_votes)
+    councilors_list = []
+    for c in sorted(councilors_data.values(), key=lambda x: x["name"]):
+        present = c["votes_za"] + c["votes_przeciw"] + c["votes_wstrzymal"] + c["votes_brak"]
+        aktywnosc = (present / total_votes_count * 100) if total_votes_count > 0 else 0
+        total_club = c["votes_with_club"] + c["votes_against_club"]
+        zgodnosc = (c["votes_with_club"] / total_club * 100) if total_club > 0 else 0
+        councilors_list.append({
+            "name": c["name"],
+            "club": c["club"],
+            "district": c["district"],
+            "frekwencja": 0.0,
+            "aktywnosc": round(aktywnosc, 1),
+            "zgodnosc_z_klubem": round(zgodnosc, 1),
+            "votes_za": c["votes_za"],
+            "votes_przeciw": c["votes_przeciw"],
+            "votes_wstrzymal": c["votes_wstrzymal"],
+            "votes_brak": c["votes_brak"],
+            "votes_nieobecny": c["votes_nieobecny"],
+            "votes_total": total_votes_count,
+            "rebellion_count": len(c["rebellions"]),
+            "rebellions": c["rebellions"][:20],
+            "has_activity_data": False,
+            "activity": None,
+        })
+
+    # Compute similarity pairs
+    name_to_club = {c["name"]: c["club"] for c in councilors_list}
+    vectors = defaultdict(dict)
+    for v in all_votes:
+        for cat in ["za", "przeciw", "wstrzymal_sie"]:
+            for name in v["named_votes"].get(cat, []):
+                vectors[name][v["id"]] = cat
+
+    pairs = []
+    names_sorted = sorted(vectors.keys())
+    for a, b in combinations(names_sorted, 2):
+        common = set(vectors[a].keys()) & set(vectors[b].keys())
+        if len(common) < 10:
+            continue
+        same = sum(1 for vid in common if vectors[a][vid] == vectors[b][vid])
+        score = round(same / len(common) * 100, 1)
+        pairs.append({
+            "a": a, "b": b,
+            "club_a": name_to_club.get(a, "?"),
+            "club_b": name_to_club.get(b, "?"),
+            "score": score,
+            "common_votes": len(common),
+        })
+    pairs.sort(key=lambda x: x["score"], reverse=True)
+    sim_top = pairs[:20]
+    sim_bottom = pairs[-20:][::-1]
+
+    # Club counts
+    club_counts = Counter()
+    for c in councilors_list:
+        club_counts[c["club"]] += 1
+
+    kad = {
+        "id": "2024-2029",
+        "label": "IX kadencja (2024\u20132029)",
+        "clubs": dict(sorted(club_counts.items())),
+        "sessions": sessions_data,
+        "total_sessions": len(sessions_data),
+        "total_votes": total_votes_count,
+        "total_councilors": len(councilors_list),
+        "councilors": councilors_list,
+        "votes": all_votes,
+        "similarity_top": sim_top,
+        "similarity_bottom": sim_bottom,
+    }
+
+    return {
+        "generated": datetime.now().isoformat(),
+        "default_kadencja": "2024-2029",
+        "kadencje": [kad],
+    }
 
 
 # ---------------------------------------------------------------------------
