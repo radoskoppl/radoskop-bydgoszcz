@@ -4,19 +4,19 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Sesja X (2024-10-30) – Radoskop Bydgoszcz</title>
-<meta name="description" content="Sesja X Rady Miasta Bydgoszczy, 2024-10-30. 28 glosowan, 28 obecnych radnych.">
+<meta name="description" content="Sesja X Rady Miasta Bydgoszczy, 2024-10-30. 21 glosowan, 28 obecnych radnych.">
 <meta name="keywords" content="Bydgoszcz, rada miasta, radni, głosowania, frekwencja, samorząd, monitoring, transparentność">
 <meta name="author" content="Patryk Orwat">
 <link rel="canonical" href="https://bydgoszcz.radoskop.pl/sesja/X/">
 <meta property="og:type" content="website">
 <meta property="og:title" content="Sesja X (2024-10-30) – Radoskop Bydgoszcz">
-<meta property="og:description" content="Sesja X Rady Miasta Bydgoszczy, 2024-10-30. 28 glosowan, 28 obecnych radnych.">
+<meta property="og:description" content="Sesja X Rady Miasta Bydgoszczy, 2024-10-30. 21 glosowan, 28 obecnych radnych.">
 <meta property="og:url" content="https://bydgoszcz.radoskop.pl/sesja/X/">
 <meta property="og:locale" content="pl_PL">
 <meta property="og:site_name" content="Radoskop Bydgoszcz">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="Sesja X (2024-10-30) – Radoskop Bydgoszcz">
-<meta name="twitter:description" content="Sesja X Rady Miasta Bydgoszczy, 2024-10-30. 28 glosowan, 28 obecnych radnych.">
+<meta name="twitter:description" content="Sesja X Rady Miasta Bydgoszczy, 2024-10-30. 21 glosowan, 28 obecnych radnych.">
 <link rel="alternate" type="application/atom+xml" title="Radoskop Bydgoszcz" href="https://bydgoszcz.radoskop.pl/feed.xml">
 <script type="application/ld+json">
 {
@@ -207,7 +207,7 @@ footer a { color:var(--accent); text-decoration:none; }
 <div id="seo-content" style="padding:20px;max-width:800px;margin:0 auto">
 <h1>Sesja X</h1>
 <p>Data: 2024-10-30</p>
-<p>Glosowan: 28 · Obecnych: 28</p>
+<p>Glosowan: 21 · Obecnych: 28</p>
 <p><a href="https://bydgoszcz.radoskop.pl/">Radoskop Bydgoszcz</a></p>
 
 </div>
@@ -1104,8 +1104,13 @@ function showProfile(name) {
           return false;
         });
       }
-      const personInterp = interpData.filter(d => interpMatchesName(d.radny || ''))
-        .sort((a,b) => (b.data_wplywu || '').localeCompare(a.data_wplywu || ''));
+      const kadSlugUpper = (KAD_SLUGS[kid] || '').toUpperCase();
+      const personInterp = interpData.filter(d => {
+        if (!interpMatchesName(d.radny || '')) return false;
+        // Filter by kadencja if available (e.g. "IX" matches KAD_SLUGS "ix")
+        if (d.kadencja && kadSlugUpper) return d.kadencja.toUpperCase() === kadSlugUpper;
+        return true;
+      }).sort((a,b) => (b.data_wplywu || '').localeCompare(a.data_wplywu || ''));
       if (personInterp.length > 0) {
         html += `<div class="section">
           <h2>Interpelacje i zapytania (${personInterp.length})</h2>
