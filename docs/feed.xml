@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Radoskop Bydgoszcz</title>
+  <subtitle>Aktualnosci z Rady Miasta Bydgoszczy. Glosowania, sesje, rebelie.</subtitle>
+  <link href="https://bydgoszcz.radoskop.pl/feed.xml" rel="self" type="application/atom+xml"/>
+  <link href="https://bydgoszcz.radoskop.pl/" rel="alternate" type="text/html"/>
+  <id>https://bydgoszcz.radoskop.pl/</id>
+  <updated>2026-03-31T13:26:20Z</updated>
+  <author>
+    <name>Radoskop</name>
+    <uri>https://radoskop.pl</uri>
+  </author>
+  <entry>
+    <title>Sesja XII Rady Miasta Bydgoszcz</title>
+    <link href="https://bydgoszcz.radoskop.pl/sesja/XII/" rel="alternate" type="text/html"/>
+    <id>https://bydgoszcz.radoskop.pl/sesja/XII/</id>
+    <published>2024-12-18T12:00:00+01:00</published>
+    <updated>2024-12-18T12:00:00+01:00</updated>
+    <summary type="html">28 glosowan. 28 obecnych radnych.</summary>
+    <category term="session"/>
+  </entry>
+  <entry>
+    <title>Sesja XI Rady Miasta Bydgoszcz</title>
+    <link href="https://bydgoszcz.radoskop.pl/sesja/XI/" rel="alternate" type="text/html"/>
+    <id>https://bydgoszcz.radoskop.pl/sesja/XI/</id>
+    <published>2024-11-27T12:00:00+01:00</published>
+    <updated>2024-11-27T12:00:00+01:00</updated>
+    <summary type="html">28 glosowan. 28 obecnych radnych.</summary>
+    <category term="session"/>
+  </entry>
+  <entry>
+    <title>Sesja X Rady Miasta Bydgoszcz</title>
+    <link href="https://bydgoszcz.radoskop.pl/sesja/X/" rel="alternate" type="text/html"/>
+    <id>https://bydgoszcz.radoskop.pl/sesja/X/</id>
+    <published>2024-10-30T12:00:00+01:00</published>
+    <updated>2024-10-30T12:00:00+01:00</updated>
+    <summary type="html">28 glosowan. 28 obecnych radnych.</summary>
+    <category term="session"/>
+  </entry>
+  <entry>
+    <title>Sesja IX Rady Miasta Bydgoszcz</title>
+    <link href="https://bydgoszcz.radoskop.pl/sesja/IX/" rel="alternate" type="text/html"/>
+    <id>https://bydgoszcz.radoskop.pl/sesja/IX/</id>
+    <published>2024-09-25T12:00:00+01:00</published>
+    <updated>2024-09-25T12:00:00+01:00</updated>
+    <summary type="html">28 glosowan. 28 obecnych radnych.</summary>
+    <category term="session"/>
+  </entry>
+  <entry>
+    <title>Sesja VIII Rady Miasta Bydgoszcz</title>
+    <link href="https://bydgoszcz.radoskop.pl/sesja/VIII/" rel="alternate" type="text/html"/>
+    <id>https://bydgoszcz.radoskop.pl/sesja/VIII/</id>
+    <published>2024-09-11T12:00:00+01:00</published>
+    <updated>2024-09-11T12:00:00+01:00</updated>
+    <summary type="html">25 glosowan. 25 obecnych radnych.</summary>
+    <category term="session"/>
+  </entry>
+  <entry>
+    <title>Sesja VII Rady Miasta Bydgoszcz</title>
+    <link href="https://bydgoszcz.radoskop.pl/sesja/VII/" rel="alternate" type="text/html"/>
+    <id>https://bydgoszcz.radoskop.pl/sesja/VII/</id>
+    <published>2024-09-04T12:00:00+01:00</published>
+    <updated>2024-09-04T12:00:00+01:00</updated>
+    <summary type="html">23 glosowan. 23 obecnych radnych.</summary>
+    <category term="session"/>
+  </entry>
+  <entry>
+    <title>Sesja VI Rady Miasta Bydgoszcz</title>
+    <link href="https://bydgoszcz.radoskop.pl/sesja/VI/" rel="alternate" type="text/html"/>
+    <id>https://bydgoszcz.radoskop.pl/sesja/VI/</id>
+    <published>2024-08-21T12:00:00+01:00</published>
+    <updated>2024-08-21T12:00:00+01:00</updated>
+    <summary type="html">25 glosowan. 25 obecnych radnych.</summary>
+    <category term="session"/>
+  </entry>
+  <entry>
+    <title>Sesja V Rady Miasta Bydgoszcz</title>
+    <link href="https://bydgoszcz.radoskop.pl/sesja/V/" rel="alternate" type="text/html"/>
+    <id>https://bydgoszcz.radoskop.pl/sesja/V/</id>
+    <published>2024-06-19T12:00:00+01:00</published>
+    <updated>2024-06-19T12:00:00+01:00</updated>
+    <summary type="html">28 glosowan. 28 obecnych radnych.</summary>
+    <category term="session"/>
+  </entry>
+  <entry>
+    <title>Sesja IV Rady Miasta Bydgoszcz</title>
+    <link href="https://bydgoszcz.radoskop.pl/sesja/IV/" rel="alternate" type="text/html"/>
+    <id>https://bydgoszcz.radoskop.pl/sesja/IV/</id>
+    <published>2024-05-22T12:00:00+01:00</published>
+    <updated>2024-05-22T12:00:00+01:00</updated>
+    <summary type="html">28 glosowan. 28 obecnych radnych.</summary>
+    <category term="session"/>
+  </entry>
+  <entry>
+    <title>Sesja III Rady Miasta Bydgoszcz</title>
+    <link href="https://bydgoszcz.radoskop.pl/sesja/III/" rel="alternate" type="text/html"/>
+    <id>https://bydgoszcz.radoskop.pl/sesja/III/</id>
+    <published>2024-05-13T12:00:00+01:00</published>
+    <updated>2024-05-13T12:00:00+01:00</updated>
+    <summary type="html">27 glosowan. 27 obecnych radnych.</summary>
+    <category term="session"/>
+  </entry>
+  <entry>
+    <title>Sesja II Rady Miasta Bydgoszcz</title>
+    <link href="https://bydgoszcz.radoskop.pl/sesja/II/" rel="alternate" type="text/html"/>
+    <id>https://bydgoszcz.radoskop.pl/sesja/II/</id>
+    <published>2024-05-07T12:00:00+01:00</published>
+    <updated>2024-05-07T12:00:00+01:00</updated>
+    <summary type="html">28 glosowan. 28 obecnych radnych.</summary>
+    <category term="session"/>
+  </entry>
+</feed>
