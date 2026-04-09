@@ -5,20 +5,11 @@
   <link href="https://bydgoszcz.radoskop.pl/feed.xml" rel="self" type="application/atom+xml"/>
   <link href="https://bydgoszcz.radoskop.pl/" rel="alternate" type="text/html"/>
   <id>https://bydgoszcz.radoskop.pl/</id>
-  <updated>2026-04-05T13:46:09Z</updated>
+  <updated>2026-04-09T03:00:28Z</updated>
   <author>
     <name>Radoskop</name>
     <uri>https://radoskop.pl</uri>
   </author>
-  <entry>
-    <title>Interpelacja: zanieczyszczenia powietrza pochodzącego z budynku przy ul. Magazynowej 11</title>
-    <link href="https://bydgoszcz.radoskop.pl/interpelacje/" rel="alternate" type="text/html"/>
-    <id>https://bydgoszcz.radoskop.pl/interpelacje/#interpelacja</id>
-    <published>2026-03-20T12:00:00+01:00</published>
-    <updated>2026-03-20T12:00:00+01:00</updated>
-    <summary type="html">Lech Zagłoba-Zygler. zanieczyszczenia powietrza pochodzącego z budynku przy ul. Magazynowej 11</summary>
-    <category term="interpelacja"/>
-  </entry>
   <entry>
     <title>3. Powołanie Komisji Uchwał i Wniosków.</title>
     <link href="https://bydgoszcz.radoskop.pl/glosowanie/247/" rel="alternate" type="text/html"/>
@@ -908,6 +899,15 @@
     <published>2024-11-27T12:00:00+01:00</published>
     <updated>2024-11-27T12:00:00+01:00</updated>
     <summary type="html">Wynik: przyjete (za 24, przeciw 0, wstrzym. 0). Sesja XI.</summary>
+    <category term="vote"/>
+  </entry>
+  <entry>
+    <title>28. Projekt uchwały w sprawie wyborów do Rady Osiedla Kapuściska.</title>
+    <link href="https://bydgoszcz.radoskop.pl/glosowanie/219/" rel="alternate" type="text/html"/>
+    <id>https://bydgoszcz.radoskop.pl/glosowanie/219/#vote</id>
+    <published>2024-11-27T12:00:00+01:00</published>
+    <updated>2024-11-27T12:00:00+01:00</updated>
+    <summary type="html">Wynik: przyjete (za 26, przeciw 0, wstrzym. 0). Sesja XI.</summary>
     <category term="vote"/>
   </entry>
 </feed>
