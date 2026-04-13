@@ -40,16 +40,28 @@
     "typ_full": "Interpelacja",
     "data_wplywu": "2026-04-01",
     "tresc_url": "https://bip.um.bydgoszcz.pl/attachments/download/31089",
+    "odpowiedz_url": "https://bip.um.bydgoszcz.pl/attachments/download/31169",
     "zalaczniki": [
       {
         "nazwa": "Interpelacja",
         "url": "https://bip.um.bydgoszcz.pl/attachments/download/31089"
+      },
+      {
+        "nazwa": "Odpowiedź",
+        "url": "https://bip.um.bydgoszcz.pl/attachments/download/31165"
+      },
+      {
+        "nazwa": "Odpowiedź",
+        "url": "https://bip.um.bydgoszcz.pl/attachments/download/31166"
+      },
+      {
+        "nazwa": "Odpowiedź",
+        "url": "https://bip.um.bydgoszcz.pl/attachments/download/31169"
       }
     ],
     "kategoria": "edukacja",
     "odpowiedz_status": "",
-    "data_odpowiedzi": "",
-    "odpowiedz_url": ""
+    "data_odpowiedzi": ""
   },
   {
     "przedmiot": "rozbiórki budynku gospodarczego przy ul. Grunwaldzkiej 111",
