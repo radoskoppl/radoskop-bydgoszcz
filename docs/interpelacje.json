@@ -76,38 +76,24 @@
     "typ_full": "Interpelacja",
     "data_wplywu": "2026-04-03",
     "tresc_url": "https://bip.um.bydgoszcz.pl/attachments/download/31191",
+    "odpowiedz_url": "https://bip.um.bydgoszcz.pl/attachments/download/31237",
     "zalaczniki": [
       {
         "nazwa": "Interpelacja",
         "url": "https://bip.um.bydgoszcz.pl/attachments/download/31191"
+      },
+      {
+        "nazwa": "Odpowiedź",
+        "url": "https://bip.um.bydgoszcz.pl/attachments/download/31236"
+      },
+      {
+        "nazwa": "Odpowiedź",
+        "url": "https://bip.um.bydgoszcz.pl/attachments/download/31237"
       }
     ],
     "kategoria": "inne",
     "odpowiedz_status": "",
-    "data_odpowiedzi": "",
-    "odpowiedz_url": ""
-  },
-  {
-    "przedmiot": "odmowy przyznania asystenta osoby niepełnosprawnej  dla 99-letniej mieszkanki miasta",
-    "bip_url": "https://bip.um.bydgoszcz.pl/interpelacja/9933/interpelacja-w-sprawie-odmowy-przyznania-asystenta-osoby-niepelnosprawnej-dla-99-letniej-mieszkanki-miasta",
-    "typ": "interpelacja",
-    "nr_sprawy": "RM.0003.211.2026",
-    "radny": "Maria Gałęska",
-    "status": "",
-    "kadencja": "IX",
-    "typ_full": "Interpelacja",
-    "data_wplywu": "2026-04-03",
-    "tresc_url": "https://bip.um.bydgoszcz.pl/attachments/download/31190",
-    "zalaczniki": [
-      {
-        "nazwa": "Interpelacja",
-        "url": "https://bip.um.bydgoszcz.pl/attachments/download/31190"
-      }
-    ],
-    "kategoria": "mieszkalnictwo",
-    "odpowiedz_status": "",
-    "data_odpowiedzi": "",
-    "odpowiedz_url": ""
+    "data_odpowiedzi": ""
   },
   {
     "przedmiot": "ul. Łowickiej 3 i bezpieczeństwa w rejonie SP nr 43 i Przedszkola Misiolandia",
